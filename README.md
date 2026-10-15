@@ -13,7 +13,7 @@ xcode-select --install   # or just run ./install.sh, which does this too
 ```
 
 ```bash
-git clone https://github.com/<your-user>/macos-setup.git ~/macos-setup && cd ~/macos-setup
+git clone https://github.com/andrielc/macos-setup.git ~/macos-setup && cd ~/macos-setup
 
 # See exactly what would happen — changes nothing:
 ./install.sh --dry-run
