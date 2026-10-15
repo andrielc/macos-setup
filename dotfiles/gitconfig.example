@@ -1,0 +1,24 @@
+# ~/.gitconfig  ::  template — the installer fills in name/email from
+# prompts (or GIT_NAME / GIT_EMAIL env vars). Never commit real identity.
+[user]
+	name = YOUR NAME
+	email = you@example.com
+[init]
+	defaultBranch = main
+[pull]
+	rebase = false
+[push]
+	autoSetupRemote = true
+[color]
+	ui = auto
+[core]
+	# No editor pinned on purpose: git falls back to $VISUAL/$EDITOR, which
+	# the zshrc sets (nvim if present, else vim — vim ships with macOS).
+[alias]
+	st = status -sb
+	lg = log --oneline --graph --decorate --all
+	co = checkout
+	br = branch
+	undo = reset --soft HEAD~1
+# delta pager is wired up via GIT_PAGER in the zshrc, only when git-delta
+# is installed — nothing to configure here.

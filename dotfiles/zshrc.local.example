@@ -1,0 +1,18 @@
+# ~/.zshrc.local  ::  machine-specific, NOT tracked in git
+# ---------------------------------------------------------
+# Copy to ~/.zshrc.local and keep PATH entries / secrets here.
+# Every entry is guarded so a missing tool is silently skipped.
+
+# ── Per-tool CLI installers (added by their own installers) ─────────
+# Some tools install their CLI into a private ~/.something/bin. Add each on
+# its own guarded line so a missing tool is silently skipped, e.g.:
+# [[ -d "$HOME/.local/some-tool/bin" ]] && path+=("$HOME/.local/some-tool/bin")
+export PATH
+
+# ── Secrets / API keys (examples — fill in your own) ───────────────
+# export OPENAI_API_KEY="..."
+# export ANTHROPIC_API_KEY="..."
+# export GITHUB_TOKEN="..."
+
+# ── Any host-specific overrides ────────────────────────────────────
+# export EDITOR="code -w"

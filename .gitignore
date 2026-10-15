@@ -1,0 +1,9 @@
+logs/
+*.bak.*
+.DS_Store
+# machine-local / secrets — never commit
+.zshrc.local
+# kernel source is multi-GB — keep the folder + README, ignore the sync
+kernel-repo/*
+!kernel-repo/.gitkeep
+!kernel-repo/README.md

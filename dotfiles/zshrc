@@ -1,0 +1,365 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║                   ~/.zshrc  ::  mobile-dev edition                 ║
+# ║   self-contained · no oh-my-zsh · truecolor · fresh-mac portable   ║
+# ╚══════════════════════════════════════════════════════════════════╝
+#
+# Machine-specific PATH entries and secrets live in ~/.zshrc.local,
+# which is sourced at the very end (see section 11). Keep this file
+# portable; keep the per-machine stuff there.
+
+# ──[ 0. Homebrew FIRST ]─────────────────────────────────────────────
+# Must come before anything that relies on brew tools so the brew
+# prefix wins over the system BSD utilities. Supports both Apple
+# Silicon (/opt/homebrew) and Intel (/usr/local).
+if [[ -x /opt/homebrew/bin/brew ]]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [[ -x /usr/local/bin/brew ]]; then
+  eval "$(/usr/local/bin/brew shellenv)"
+fi
+
+# De-duplicate PATH/FPATH automatically (keeps first occurrence).
+typeset -U path fpath
+
+# ──[ 1. Environment ]────────────────────────────────────────────────
+export LANG=en_US.UTF-8
+# Respect a pre-set EDITOR; otherwise prefer nvim, falling back to vim
+# (which ships with macOS, so this works without any Homebrew install).
+if [[ -z "${EDITOR:-}" ]]; then
+  if command -v nvim >/dev/null; then export EDITOR="nvim"; else export EDITOR="vim"; fi
+fi
+export VISUAL="$EDITOR"
+export PAGER="less"
+export LESS="-R"                     # keep colors in less
+# Set LS_COLORS up front so the completion list-colors (section 4) has a
+# value — it's consumed there, long before the ls aliases in section 9.
+export LS_COLORS="di=1;36:ln=1;35:so=32:pi=33:ex=1;32:bd=34;46:cd=34;43:su=30;41:sg=30;46:tw=30;42:ow=30;43"
+# NOTE: TERM is intentionally NOT forced here — Ghostty/iTerm/tmux set
+# the correct truecolor TERM themselves. Forcing xterm-256color breaks
+# their advertised capabilities.
+
+# ── Java (portable: ask the system which JDK is installed) ──────────
+# /usr/libexec/java_home finds the newest JDK registered under
+# /Library/Java/JavaVirtualMachines. The installer symlinks brew's
+# openjdk there so this works on a fresh machine.
+if /usr/libexec/java_home >/dev/null 2>&1; then
+  export JAVA_HOME="$(/usr/libexec/java_home)"
+fi
+
+# ── Android SDK ─────────────────────────────────────────────────────
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"   # newer name some tools expect
+if [[ -d "$ANDROID_HOME" ]]; then
+  # Pick the NEWEST *stable* build-tools and NDK instead of hardcoding a
+  # version. (Nn/On) = nullglob, numeric sort, dirs only, highest first.
+  # rc/beta builds are skipped: build-tools puts it in the dir name
+  # (36.0.0-rc5), the NDK only in source.properties
+  # ("Pkg.Revision = 29.0.13599879-beta2"), read without forking.
+  local _d _rev _bt= _ndk=
+  for _d in "$ANDROID_HOME"/build-tools/*(Nn/On); do
+    [[ ${_d:t} == *-* ]] || { _bt=$_d; break; }
+  done
+  [[ -n "$_bt" ]] && path+=("$_bt")
+  for _d in "$ANDROID_HOME"/ndk/*(Nn/On); do
+    [[ -r $_d/source.properties ]] || continue
+    _rev=${${(M)${(f)"$(<$_d/source.properties)"}:#Pkg.Revision*}#*= }
+    [[ $_rev == *-* ]] || { _ndk=$_d; break; }
+  done
+  if [[ -n "$_ndk" ]]; then
+    export ANDROID_NDK_HOME="$_ndk"
+    # NDK keeps the "darwin-x86_64" dir name even on Apple Silicon.
+    local _llvm="$_ndk/toolchains/llvm/prebuilt/darwin-x86_64/bin"
+    [[ -d "$_llvm" ]] && path+=("$_llvm")
+  fi
+  # Modern tool locations (cmdline-tools/latest + emulator; the old
+  # $ANDROID_HOME/tools is deprecated and omitted on purpose).
+  path+=(
+    "$ANDROID_HOME/cmdline-tools/latest/bin"
+    "$ANDROID_HOME/platform-tools"
+    "$ANDROID_HOME/emulator"
+  )
+fi
+
+# ── GNU sed/tar ahead of the system BSD versions ────────────────────
+# (Only sed + tar, matching the original config. coreutils is installed
+# but deliberately kept OFF PATH so `stat`/`date`/`ls` flags stay BSD.)
+for _gnu in gnu-sed/libexec/gnubin gnu-tar/libexec/gnubin; do
+  [[ -d "$HOMEBREW_PREFIX/opt/$_gnu" ]] && path=("$HOMEBREW_PREFIX/opt/$_gnu" $path)
+done
+# DB client (keg-only) if present
+[[ -d "$HOMEBREW_PREFIX/opt/mysql-client/bin" ]] && path=("$HOMEBREW_PREFIX/opt/mysql-client/bin" $path)
+
+# ── Language toolchains (only if installed) ─────────────────────────
+[[ -d "$HOME/go/bin" ]]      && path+=("$HOME/go/bin")   # no `go env` subshell
+[[ -d "$HOME/.cargo/bin" ]]  && path+=("$HOME/.cargo/bin")
+[[ -f "$HOME/.cargo/env" ]]  && source "$HOME/.cargo/env"
+# Chromium depot_tools (gclient/gn/autoninja for V8, see scripts/v8-sync.sh).
+# APPENDED per Chromium's mac docs so brew's ninja/python keep priority.
+[[ -d "$HOME/tools/depot_tools" ]] && path+=("$HOME/tools/depot_tools")
+
+# ── Personal bins (keep ~/.local/bin FIRST so our shims win) ────────
+[[ -d "$HOME/.bin" ]]    && path=("$HOME/.bin" $path)
+path=("$HOME/.local/bin" $path)
+
+export PATH
+
+# ──[ 2. History ]────────────────────────────────────────────────────
+HISTFILE="$HOME/.zsh_history"
+HISTSIZE=1000000000                  # effectively unlimited in memory
+SAVEHIST=1000000000                  # effectively unlimited on disk
+setopt HIST_IGNORE_SPACE            # leading-space cmd = not saved (incognito)
+setopt HIST_REDUCE_BLANKS           # tidy extra whitespace
+setopt SHARE_HISTORY                # sync across open terminals (implies append)
+setopt EXTENDED_HISTORY             # timestamp each command
+setopt HIST_VERIFY                  # expand !! etc. onto the line, don't run blind
+
+# ──[ 3. Shell behaviour ]────────────────────────────────────────────
+setopt AUTO_CD                      # `..` or a dir name = cd there
+setopt AUTO_PUSHD                   # every cd pushes the dir stack
+setopt PUSHD_IGNORE_DUPS
+setopt INTERACTIVE_COMMENTS         # allow # comments interactively
+setopt NO_BEEP
+setopt PROMPT_SUBST                 # required for the dynamic prompt
+setopt CORRECT                      # command typo correction (as in original)
+
+# ──[ 4. Completion engine ]──────────────────────────────────────────
+# Add brew's completion functions to fpath BEFORE compinit.
+if [[ -n "$HOMEBREW_PREFIX" ]]; then
+  fpath=("$HOMEBREW_PREFIX/share/zsh/site-functions" $fpath)
+fi
+autoload -Uz compinit
+# Only do the slow permissions check once a day; otherwise load the cached
+# dump with -C. The glob flag (#q..) needs extended_glob, scoped locally
+# so we don't change global globbing (which would break e.g. HEAD^).
+_zcd="$HOME/.zcompdump"
+if () { setopt local_options extended_glob; [[ -n $_zcd(#qN.mh-24) ]] }; then
+  compinit -C -d "$_zcd"          # dump is <24h old → fast path
+else
+  compinit -d "$_zcd"            # stale/missing → full rebuild
+fi
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
+zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
+zstyle ':completion:*:descriptions' format '%F{14}-- %d --%f'
+zstyle ':completion:*' group-name ''
+
+# ──[ 5. THE PROMPT ]─────────────────────────────────────────────────
+#   ╭─[user@host]─[~/path]
+#   ╰─>
+# Muted ANSI (follows whatever terminal theme you pick):
+#   2=green(user@host) · 4=blue(path) · 8=gray(frame) · 1=red(error)
+_user='%F{2}%n%f'; _at='%F{8}@%f'; _host='%F{2}%m%f'
+_path='%F{4}%~%f'
+_sym='%(?.%F{7}>%f.%F{1}>%f)'       # gray normally, red if last cmd failed
+PROMPT='%F{8}╭─[%f${_user}${_at}${_host}%F{8}]─[%f${_path}%F{8}]%f
+%F{8}╰─%f${_sym} '
+
+# ──[ 6. Aliases ]────────────────────────────────────────────────────
+# (ls family auto-detects in section 9)
+
+# grep colorized
+alias grep='grep --color=auto'
+alias fgrep='fgrep --color=auto'
+alias egrep='egrep --color=auto'
+
+# navigation
+alias ..='cd ..'
+alias ...='cd ../..'
+alias ....='cd ../../..'
+alias .....='cd ../../../..'
+alias -- -='cd -'
+alias dl='cd ~/Downloads'
+alias dt='cd ~/Desktop'
+alias dev='cd ~/Developer 2>/dev/null || cd ~/dev'
+
+# safety nets
+alias cp='cp -iv'
+alias mv='mv -iv'
+alias mkdir='mkdir -pv'
+
+# quality of life
+alias c='clear'
+alias q='exit'
+alias h='history'
+alias hg='history | grep'
+alias reload='exec zsh'                   # cleaner than re-sourcing
+alias zshrc='${EDITOR} ~/.zshrc'
+alias path='echo -e ${PATH//:/\\n}'
+alias now='date "+%Y-%m-%d %H:%M:%S"'
+
+# disk / system
+alias df='df -h'
+alias du='du -h'
+alias dus='du -sh * 2>/dev/null | sort -rh'
+alias mem='command top -l 1 -s 0 | command grep PhysMem'  # `command` bypasses the top/grep aliases
+
+# processes
+alias psg='ps aux | grep -v grep | grep -i'
+alias topcpu='ps aux | sort -nrk 3 | head'
+alias topmem='ps aux | sort -nrk 4 | head'
+
+# network
+alias myip='curl -s ifconfig.me; echo'
+alias localip='ipconfig getifaddr en0'
+alias ping='ping -c 5'
+alias ports='lsof -iTCP -sTCP:LISTEN -n -P'
+
+# git
+alias g='git'
+alias gs='git status -sb'
+alias ga='git add'
+alias gaa='git add -A'
+alias gc='git commit -m'
+alias gca='git commit -am'
+alias gp='git push'
+alias gpl='git pull'
+alias gf='git fetch --all --prune'
+alias gco='git checkout'
+alias gcb='git checkout -b'
+alias gb='git branch'
+alias gd='git diff'
+alias gds='git diff --staged'
+alias gl='git log --oneline --graph --decorate --all'
+alias gundo='git reset --soft HEAD~1'
+alias gclean='git clean -fd'
+
+# homebrew
+alias brewup='brew update && brew upgrade && brew cleanup'
+alias brewls='brew leaves'
+
+# macOS niceties
+alias showfiles='defaults write com.apple.finder AppleShowAllFiles YES && killall Finder'
+alias hidefiles='defaults write com.apple.finder AppleShowAllFiles NO && killall Finder'
+alias flushdns='sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder && echo "DNS flushed"'
+alias cleanup='find . -type f -name "*.DS_Store" -delete && echo ".DS_Store removed"'
+alias o='open .'
+alias pbc='pbcopy'
+alias pbp='pbpaste'
+
+# ── mobile-dev shortcuts ────────────────────────────────────────────
+alias adbr='adb root'
+alias adbrs='adb root && adb remount'
+alias adbdev='adb devices -l'
+alias adbshell='adb shell'
+alias adblog='adb logcat'
+alias adbip='adb shell ip -f inet addr show wlan0'
+alias apklist='adb shell pm list packages'          # apklist | grep <app>
+alias apkpath='adb shell pm path'                    # apkpath com.foo -> apk location
+alias logcrash='adb logcat *:E'
+# frida helpers (frida-server push lives in scripts/frida-server.sh)
+alias fps='frida-ps -U'           # processes on USB device
+alias fpsa='frida-ps -Ua'         # running apps
+alias fpsi='frida-ps -Uai'        # installed apps
+# iOS
+alias idev='idevice_id -l'
+alias idevinfo='ideviceinfo'
+
+# modern tool swaps (only if installed)
+command -v bat   >/dev/null && alias cat='bat --paging=never'
+# top: prefer btop, fall back to htop (whichever is installed; btop wins
+# if both — flip these two lines if you prefer htop).
+if command -v btop >/dev/null; then alias top='btop'
+elif command -v htop >/dev/null; then alias top='htop'; fi
+command -v delta >/dev/null && export GIT_PAGER='delta'
+# NOTE: `grep` is intentionally NOT aliased to ripgrep — rg's flags differ
+# (e.g. `grep -r foo .` would misfire). Use `rg` explicitly instead.
+
+# ──[ 7. Functions ]──────────────────────────────────────────────────
+mkcd() { mkdir -p "$1" && cd "$1"; }
+
+extract() {
+  if [[ -f "$1" ]]; then
+    case "$1" in
+      *.tar.bz2) tar xjf "$1"   ;;
+      *.tar.gz)  tar xzf "$1"   ;;
+      *.tar.xz)  tar xJf "$1"   ;;
+      *.bz2)     bunzip2 "$1"   ;;
+      *.rar)     if command -v unrar >/dev/null; then unrar x "$1"
+                 else echo "need 'unrar' (not a built-in): brew install carlocab/personal/unrar"; fi ;;
+      *.gz)      gunzip "$1"    ;;
+      *.tar)     tar xf "$1"    ;;
+      *.zip)     unzip "$1"     ;;
+      *.7z)      if command -v 7z >/dev/null; then 7z x "$1"       # p7zip
+                 elif command -v 7zz >/dev/null; then 7zz x "$1"   # sevenzip
+                 else echo "need 7-zip (not a built-in): brew install sevenzip"; fi ;;
+      *)         echo "'$1' :: unknown archive format" ;;
+    esac
+  else
+    echo "'$1' is not a valid file"
+  fi
+}
+
+serve() { python3 -m http.server "${1:-8000}"; }
+
+# fuzzy-jump into a dir (needs fzf)
+j() {
+  local dir
+  dir=$(find "${1:-$HOME}" -type d 2>/dev/null | fzf) && cd "$dir"
+}
+
+# pull an installed APK off the device by package name → ./<pkg>.apk
+pullapk() {
+  [[ -z "$1" ]] && { echo "usage: pullapk <package.name>"; return 1; }
+  local p
+  p=$(adb shell pm path "$1" | head -1 | sed 's/package://;s/\r//')
+  [[ -z "$p" ]] && { echo "package '$1' not found on device"; return 1; }
+  adb pull "$p" "./$1.apk" && echo "saved ./$1.apk"
+}
+
+# ──[ 8. Keybindings ]────────────────────────────────────────────────
+bindkey -e
+bindkey '^[[A' history-search-backward
+bindkey '^[[B' history-search-forward
+bindkey '^[[H' beginning-of-line
+bindkey '^[[F' end-of-line
+bindkey '^[[3~' delete-char
+
+# ──[ 9. Listing :: eza > GNU ls > BSD ls (auto-detect) ]─────────────
+if command -v eza >/dev/null; then
+  alias ls='eza -lah --icons --git --group-directories-first'
+  alias ll='eza -lah --icons --git --group-directories-first'
+  alias la='eza -lah --icons --git --group-directories-first --all'
+  alias lc='eza --icons --group-directories-first'
+  alias lt='eza --tree --level=2 --icons'
+elif ls --color=auto >/dev/null 2>&1; then
+  # LS_COLORS already exported in section 1 (GNU ls reads it from the env).
+  alias ls='ls -lah --color=auto'
+  alias ll='ls -lah --color=auto'
+  alias la='ls -lAh --color=auto'
+  alias lc='ls -CF  --color=auto'
+else
+  export CLICOLOR=1
+  export LSCOLORS="GxFxCxDxCxCxCxCxCxCxCx"
+  alias ls='ls -Glah'
+  alias ll='ls -Glah'
+  alias la='ls -GlAh'
+  alias lc='ls -GCF'
+fi
+
+# ──[ 10. Plugins ]───────────────────────────────────────────────────
+# Prefer the brew-installed copies; fall back to ~/.zsh clones.
+_zsh_plug() {   # $1 = brew share subpath, $2 = ~/.zsh fallback path
+  if [[ -n "$HOMEBREW_PREFIX" && -f "$HOMEBREW_PREFIX/share/$1" ]]; then
+    source "$HOMEBREW_PREFIX/share/$1"
+  elif [[ -f "$HOME/.zsh/$2" ]]; then
+    source "$HOME/.zsh/$2"
+  fi
+}
+_zsh_plug zsh-autosuggestions/zsh-autosuggestions.zsh \
+          zsh-autosuggestions/zsh-autosuggestions.zsh
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
+
+# fzf keybindings/completion if installed
+if command -v fzf >/dev/null; then
+  source <(fzf --zsh) 2>/dev/null
+fi
+# zoxide (smarter cd) if installed
+command -v zoxide >/dev/null && eval "$(zoxide init zsh)"
+
+# syntax-highlighting MUST be sourced last
+_zsh_plug zsh-syntax-highlighting/zsh-syntax-highlighting.zsh \
+          zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+# ──[ 11. Machine-local overrides ]───────────────────────────────────
+# PATH entries for per-machine tool installers, API keys, and anything you
+# don't want committed. Not tracked in git. See dotfiles/zshrc.local.example.
+[[ -f "$HOME/.zshrc.local" ]] && source "$HOME/.zshrc.local"
